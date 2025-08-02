@@ -1,0 +1,10 @@
+[package]
+name = "lib-zx-sna"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+rand = {version="0.9.2", default-features = false, features = ["thread_rng"] }
+#getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[dependencies]
