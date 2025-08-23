@@ -5,6 +5,9 @@
 // THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // https://opensource.org/license/mit
 
+use std::io::Read;
+use std::fs::File;
+
 /// This module provides functionality to handle ZX Spectrum snapshots.
 /// It includes structures to represent the snapshot header, extension,
 /// and the snapshot itself. The snapshots can be created from binary data
@@ -109,113 +112,6 @@ impl Default for Snapshot {
 }
 
 impl Snapshot {
-    /// Creates a new `Snapshot` from a file path.
-    /// It reads the binary data from the file and initializes the snapshot.
-    /// The file should contain a ZX Spectrum snapshot in binary format.
-    pub fn from_file(file_path: &str) -> Self {
-        let bin = std::fs::read(file_path).expect("Failed to read snapshot file");
-        Snapshot::from_bin(&bin)
-    }
-
-    /// Creates a new `Snapshot` from a binary slice.
-    /// It initializes the snapshot based on the binary data provided.
-    /// The binary data should be in the format of a ZX Spectrum snapshot.
-    /// If the binary data is larger than 49179 bytes, it is treated as a
-    /// ZX Spectrum 128 snapshot, and the extension fields are populated.
-    /// Otherwise, it is treated as a ZX Spectrum 48 snapshot.
-    /// The memory is allocated to hold the snapshot data, and the relevant
-    /// parts of the binary data are copied into the memory.
-    /// The function returns a `Snapshot` instance with the initialized fields.
-    /// ///
-    /// # Arguments
-    /// * `bin` - A byte slice containing the binary data of the snapshot.
-    ///
-    /// # Returns
-    /// A `Snapshot` instance initialized with the data from the binary slice.
-    pub fn from_bin(bin: &[u8]) -> Self {
-        const HEADER_SIZE: usize = std::mem::size_of::<SnapshotHeader>();
-        let mut mapping: [u8; 3] = [0, 1, 2];  // assume 48k mapping (for now)
-
-        let mut banks: Vec<Vec<u8>> = Vec::new();
-
-        let mut extension = None;
-        let mut snapshot_type = SnapshotType::Snapshot48;
-
-        if bin.len() > MEM_48K + HEADER_SIZE {
-
-            snapshot_type = SnapshotType::Snapshot128;
-            extension = Some(SnapshotExtension {
-                pc: u16::from_le_bytes([bin[49179], bin[49180]]),
-                x7ffd: bin[49181],
-                tr_dos: bin[49182],
-            });
-
-            // allocate 128K in 8 memory banks
-            banks.push(vec![0u8; MEM_16K]); // bank 0
-            banks.push(vec![0u8; MEM_16K]); // bank 1
-            banks.push(vec![0u8; MEM_16K]); // bank 2
-            banks.push(vec![0u8; MEM_16K]); // bank 3
-            banks.push(vec![0u8; MEM_16K]); // bank 4
-            banks.push(vec![0u8; MEM_16K]); // bank 5
-            banks.push(vec![0u8; MEM_16K]); // bank 6
-            banks.push(vec![0u8; MEM_16K]); // bank 7
-
-            mapping[0] = 5; // bank 0
-            mapping[1] = 2; // bank 1
-            mapping[2] = extension.as_ref().unwrap().x7ffd & 0x07; // bank 2
-
-            // take care of the banks mapped to the lower 48k
-            banks[5][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE..HEADER_SIZE + MEM_16K]);
-            banks[2][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + MEM_16K..HEADER_SIZE + (2 * MEM_16K)]);
-            banks[mapping[2] as usize][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + (2 * MEM_16K)..HEADER_SIZE + (3 * MEM_16K)]);
-
-            // fill the rest of the banks with the remaining data
-            let mut potential_banks = vec![0, 1, 3, 4, 6, 7];
-            potential_banks.retain(|&x| x != mapping[2] as usize);
-
-            let mut index = HEADER_SIZE + MEM_48K + std::mem::size_of::<SnapshotExtension>();
-            for bank in potential_banks {
-                banks[bank][0..MEM_16K].copy_from_slice(&bin[index..index + MEM_16K]);
-                index += MEM_16K;
-            }
-        }
-        else{
-            // allocate 48K in 3 memory banks
-            banks.push(vec![0u8; MEM_16K]);
-            banks.push(vec![0u8; MEM_16K]);
-            banks.push(vec![0u8; MEM_16K]);
-
-            banks[0][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE..HEADER_SIZE + MEM_16K]);
-            banks[1][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + MEM_16K..HEADER_SIZE + (2 * MEM_16K)]);
-            banks[2][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + (2 * MEM_16K)..HEADER_SIZE + (3 * MEM_16K)]);
-        }
-
-        Snapshot {
-            header : SnapshotHeader {
-                i: bin[0],
-                hl_prime: u16::from_le_bytes([bin[1], bin[2]]),
-                de_prime: u16::from_le_bytes([bin[3], bin[4]]),
-                bc_prime: u16::from_le_bytes([bin[5], bin[6]]),
-                af_prime: u16::from_le_bytes([bin[7], bin[8]]),
-                hl: u16::from_le_bytes([bin[9], bin[10]]),
-                de: u16::from_le_bytes([bin[11], bin[12]]),
-                bc: u16::from_le_bytes([bin[13], bin[14]]),
-                iy: u16::from_le_bytes([bin[15], bin[16]]),
-                ix: u16::from_le_bytes([bin[17], bin[18]]),
-                interrupt: bin[19],
-                r: bin[20],
-                af: u16::from_le_bytes([bin[21], bin[22]]),
-                sp: u16::from_le_bytes([bin[23], bin[24]]),
-                int_mode: bin[25],
-                border_color: bin[26],
-            },
-            snapshot_type,
-            extension,
-            banks,
-            mapping
-        }
-    }
-
     /// poke writes a byte to the memory MAPPED to the given address.
     /// If the address is less than 0x4000, it panics with an error message.
     /// The address is expected to be in the range of 0x4000 to 0xFFFF.
@@ -352,6 +248,126 @@ impl Snapshot {
     }
 }
 
+
+
+impl TryFrom<File> for Snapshot {
+    type Error = std::io::Error;
+
+    /// Creates a new `Snapshot` from a file.
+    /// It reads the binary data from the file and initializes the snapshot.
+    /// The file should contain a ZX Spectrum snapshot in binary format.
+    fn try_from(mut file: File) -> Result<Self, Self::Error> {
+        let mut bin = Vec::new();
+        file.read_to_end(&mut bin)?;
+        let snapshot = Snapshot::try_from(bin.as_slice()).expect("Failed to create snapshot from binary data");
+        Ok(snapshot)
+    }
+}
+
+
+impl TryFrom<&[u8]> for Snapshot {
+    type Error = std::string::FromUtf8Error;
+
+    /// Creates a new `Snapshot` from a binary slice.
+    /// It initializes the snapshot based on the binary data provided.
+    /// The binary data should be in the format of a ZX Spectrum snapshot.
+    /// If the binary data is larger than 49179 bytes, it is treated as a
+    /// ZX Spectrum 128 snapshot, and the extension fields are populated.
+    /// Otherwise, it is treated as a ZX Spectrum 48 snapshot.
+    /// The memory is allocated to hold the snapshot data, and the relevant
+    /// parts of the binary data are copied into the memory.
+    /// The function returns a `Snapshot` instance with the initialized fields.
+    /// ///
+    /// # Arguments
+    /// * `bin` - A byte slice containing the binary data of the snapshot.
+    ///
+    /// # Returns
+    /// A `Snapshot` instance initialized with the data from the binary slice.
+    fn try_from(bin: &[u8]) -> Result<Self, Self::Error> {
+        const HEADER_SIZE: usize = std::mem::size_of::<SnapshotHeader>();
+        let mut mapping: [u8; 3] = [0, 1, 2];  // assume 48k mapping (for now)
+
+        let mut banks: Vec<Vec<u8>> = Vec::new();
+
+        let mut extension = None;
+        let mut snapshot_type = SnapshotType::Snapshot48;
+
+        if bin.len() > MEM_48K + HEADER_SIZE {
+
+            snapshot_type = SnapshotType::Snapshot128;
+            extension = Some(SnapshotExtension {
+                pc: u16::from_le_bytes([bin[49179], bin[49180]]),
+                x7ffd: bin[49181],
+                tr_dos: bin[49182],
+            });
+
+            // allocate 128K in 8 memory banks
+            banks.push(vec![0u8; MEM_16K]); // bank 0
+            banks.push(vec![0u8; MEM_16K]); // bank 1
+            banks.push(vec![0u8; MEM_16K]); // bank 2
+            banks.push(vec![0u8; MEM_16K]); // bank 3
+            banks.push(vec![0u8; MEM_16K]); // bank 4
+            banks.push(vec![0u8; MEM_16K]); // bank 5
+            banks.push(vec![0u8; MEM_16K]); // bank 6
+            banks.push(vec![0u8; MEM_16K]); // bank 7
+
+            mapping[0] = 5; // bank 0
+            mapping[1] = 2; // bank 1
+            mapping[2] = extension.as_ref().unwrap().x7ffd & 0x07; // bank 2
+
+            // take care of the banks mapped to the lower 48k
+            banks[5][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE..HEADER_SIZE + MEM_16K]);
+            banks[2][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + MEM_16K..HEADER_SIZE + (2 * MEM_16K)]);
+            banks[mapping[2] as usize][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + (2 * MEM_16K)..HEADER_SIZE + (3 * MEM_16K)]);
+
+            // fill the rest of the banks with the remaining data
+            let mut potential_banks = vec![0, 1, 3, 4, 6, 7];
+            potential_banks.retain(|&x| x != mapping[2] as usize);
+
+            let mut index = HEADER_SIZE + MEM_48K + std::mem::size_of::<SnapshotExtension>();
+            for bank in potential_banks {
+                banks[bank][0..MEM_16K].copy_from_slice(&bin[index..index + MEM_16K]);
+                index += MEM_16K;
+            }
+        }
+        else{
+            // allocate 48K in 3 memory banks
+            banks.push(vec![0u8; MEM_16K]);
+            banks.push(vec![0u8; MEM_16K]);
+            banks.push(vec![0u8; MEM_16K]);
+
+            banks[0][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE..HEADER_SIZE + MEM_16K]);
+            banks[1][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + MEM_16K..HEADER_SIZE + (2 * MEM_16K)]);
+            banks[2][0..MEM_16K].copy_from_slice(&bin[HEADER_SIZE + (2 * MEM_16K)..HEADER_SIZE + (3 * MEM_16K)]);
+        }
+
+        Ok(Snapshot {
+            header : SnapshotHeader {
+                i: bin[0],
+                hl_prime: u16::from_le_bytes([bin[1], bin[2]]),
+                de_prime: u16::from_le_bytes([bin[3], bin[4]]),
+                bc_prime: u16::from_le_bytes([bin[5], bin[6]]),
+                af_prime: u16::from_le_bytes([bin[7], bin[8]]),
+                hl: u16::from_le_bytes([bin[9], bin[10]]),
+                de: u16::from_le_bytes([bin[11], bin[12]]),
+                bc: u16::from_le_bytes([bin[13], bin[14]]),
+                iy: u16::from_le_bytes([bin[15], bin[16]]),
+                ix: u16::from_le_bytes([bin[17], bin[18]]),
+                interrupt: bin[19],
+                r: bin[20],
+                af: u16::from_le_bytes([bin[21], bin[22]]),
+                sp: u16::from_le_bytes([bin[23], bin[24]]),
+                int_mode: bin[25],
+                border_color: bin[26],
+            },
+            snapshot_type,
+            extension,
+            banks,
+            mapping
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,7 +378,8 @@ mod tests {
     #[test]
     fn test_48k_file() {
         let expected: [u16; 3] = [59066, 0, 11458];  // assume 48k mapping (for now)
-        let snapshot = Snapshot::from_file("48k.sna");
+        let file = File::open("48k.sna").expect("Failed to open snapshot file");
+        let snapshot = Snapshot::try_from(file).expect("Failed to parse snapshot");
         for bank in 0..3 {
             let checksum = snapshot.checksum(bank);
             assert_eq!(checksum, expected[bank], "Checksum for bank {} is incorrect expected {}, got {}", bank, expected[bank], checksum);
@@ -374,7 +391,8 @@ mod tests {
     #[test]
     fn test_128k_file() {
         let expected: [u16; 8] = [12174, 0, 0, 0, 0, 46342, 0, 10827];
-        let snapshot = Snapshot::from_file("128k.sna");
+        let file = File::open("128k.sna").expect("Failed to open snapshot file");
+        let snapshot = Snapshot::try_from(file).expect("Failed to parse snapshot");
         assert_eq!(snapshot.snapshot_type, SnapshotType::Snapshot128, "Snapshot type is not Snapshot128");
         for bank in 0..=7 {
             let checksum = snapshot.checksum(bank);
@@ -388,7 +406,8 @@ mod tests {
     #[test]
     fn test_port_7ffd() {
         let expected: [u16; 8] = [12174, 0, 0, 0, 0, 46342, 0, 10827];
-        let mut snapshot = Snapshot::from_file("128k.sna");
+        let file = File::open("128k.sna").expect("Failed to open snapshot file");
+        let mut snapshot = Snapshot::try_from(file).expect("Failed to parse snapshot");
         assert_eq!(snapshot.snapshot_type, SnapshotType::Snapshot128, "Snapshot type is not Snapshot128");
         for bank in 0..=7 {
             snapshot.write_0x7ffd(bank as u8);
@@ -408,7 +427,9 @@ mod tests {
     #[test]
     fn test_bank_peek() {
         let mut rng = rand::rng();
-        let mut snapshot = Snapshot::from_file("128k.sna");
+        let file = File::open("128k.sna").expect("Failed to open snapshot file");
+        let mut snapshot = Snapshot::try_from(file).expect("Failed to parse snapshot");
+
         assert_eq!(snapshot.snapshot_type, SnapshotType::Snapshot128, "Snapshot type is not Snapshot128");
         for bank in 0..=7 {
             let mut mapped_checksum: u16 = 0;
@@ -432,7 +453,9 @@ mod tests {
     #[test]
     fn test_bank_poke() {
         let mut rng = rand::rng();
-        let mut snapshot = Snapshot::from_file("128k.sna");
+        let file = File::open("128k.sna").expect("Failed to open snapshot file");
+        let mut snapshot = Snapshot::try_from(file).expect("Failed to parse snapshot");
+
         assert_eq!(snapshot.snapshot_type, SnapshotType::Snapshot128, "Snapshot type is not Snapshot128");
         for bank in 0..=7 {
             let mut bank_checksum: u16 = 0;
