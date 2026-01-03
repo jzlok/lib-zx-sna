@@ -259,13 +259,13 @@ impl TryFrom<File> for Snapshot {
     fn try_from(mut file: File) -> Result<Self, Self::Error> {
         let mut bin = Vec::new();
         file.read_to_end(&mut bin)?;
-        let snapshot = Snapshot::try_from(bin.as_slice()).expect("Failed to create snapshot from binary data");
+        let snapshot = Snapshot::try_from(bin).expect("Failed to create snapshot from binary data");
         Ok(snapshot)
     }
 }
 
 
-impl TryFrom<&[u8]> for Snapshot {
+impl TryFrom<Vec<u8>> for Snapshot {
     type Error = std::string::FromUtf8Error;
 
     /// Creates a new `Snapshot` from a binary slice.
@@ -283,7 +283,7 @@ impl TryFrom<&[u8]> for Snapshot {
     ///
     /// # Returns
     /// A `Snapshot` instance initialized with the data from the binary slice.
-    fn try_from(bin: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(bin: Vec<u8>) -> Result<Self, Self::Error> {
         const HEADER_SIZE: usize = std::mem::size_of::<SnapshotHeader>();
         let mut mapping: [u8; 3] = [0, 1, 2];  // assume 48k mapping (for now)
 
