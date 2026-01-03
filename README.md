@@ -25,7 +25,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-lib-zx-sna = "0.1.0"
+lib-zx-sna = "0.1.2"
 ```
 
 ## Usage
